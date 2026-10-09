@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791157296513,
+      "tag": "0000_fair_mandrill",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791159069231,
+      "tag": "0001_jittery_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791552000000,
+      "tag": "0002_coach_storage",
+      "breakpoints": true
+    }
+  ]
+}
