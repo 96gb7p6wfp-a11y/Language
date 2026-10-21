@@ -1,179 +1,79 @@
 "use client";
+import {useEffect,useRef,useState} from "react";
+import {ArrowRight,ArrowUpRight,BookOpen,Check,ChevronRight,Compass,GraduationCap,Layers,MessageCircle,Settings2,ChartNoAxesCombined,Sun,ArrowLeft,ShieldCheck,Search,Plus,Minus,RotateCcw} from "lucide-react";
+import type {Language,Level} from "@/lib/curriculum";
+import {useCoach} from "@/hooks/use-coach";
+import {useMissions} from "@/hooks/use-missions";
+import {missionTemplates,recommendMissions,getMissionTemplate,MISSION_TOPICS,MISSION_TOPIC_LABELS,MISSION_KIND_LABELS,type MissionKind,type MissionTopic,type MissionRun,type MissionPreferences} from "@/lib/missions";
+import MissionSession from "@/app/components/mission-session";
+import MissionArt from "@/app/components/mission-art";
+import PracticeLibrary from "@/app/components/practice-library";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { ArrowUpRight, ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clock3, Headphones, Layers, MessageCircle, Mic, PenLine, Settings2, Sparkles, Sun, Target, GraduationCap, ChartNoAxesCombined, CalendarDays, Volume2, Plus, X } from "lucide-react";
-import { exercises, type Language, type Level, type Category } from "@/lib/curriculum";
-import { emptyProgress, localDate, type ProgressState } from "@/lib/progress";
-import { makePlan, type PlanActivity, type Skill } from "@/lib/coach";
-import { useCoach } from "@/hooks/use-coach";
-import { getInput } from "@/lib/fluency-content";
-import FluencySession from "@/app/components/fluency-session";
-import ExercisePractice from "@/app/components/exercise-practice";
-import ChunksWorkspace from "@/app/components/chunks-workspace";
-import GrammarWorkspace from "@/app/components/grammar-workspace";
-import ExamWorkspace from "@/app/components/exam-workspace";
-
-const levels: Level[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
-const times = [20, 45, 60, 90] as const;
-const goals = [{ value: "natural", label: "Speak naturally" }, { value: "near-native", label: "Near-native" }, { value: "school", label: "School" }, { value: "ielts", label: "IELTS" }, { value: "work", label: "Work / university" }];
-const skillIcons = { listen: Headphones, read: BookOpen, speak: MessageCircle, write: PenLine, chunks: Layers, grammar: Sparkles, pronunciation: Mic, exam: GraduationCap };
-const shortInstructions: Record<Language, Record<Skill, string>> = {
-  en: {listen:"Listen without subtitles.", read:"Read naturally. Collect useful expressions.", speak:"Give your view. Add an example.", write:"Write a short argument.", chunks:"Recall useful expressions.", grammar:"Work on one repeated mistake.", pronunciation:"Listen. Repeat. Match the rhythm.", exam:"Practise one task."},
-  de: {listen:"Höre ohne Untertitel.", read:"Lies und sammle Wendungen.", speak:"Erkläre deine Meinung.", write:"Schreibe eine kurze Position.", chunks:"Rufe Wendungen ab.", grammar:"Übe einen Fehler.", pronunciation:"Hören. Nachsprechen. Rhythmus.", exam:"Übe eine Aufgabe."}
-};
-const skillNames: Record<string, string> = { listen: "Listening", read: "Reading", speak: "Speaking", write: "Writing", chunks: "Chunks", grammar: "Grammar", pronunciation: "Pronunciation", exam: "Exam Mode" };
-const practiceItems = [{ skill: "speak", label: "Speak" }, { skill: "listen", label: "Listen" }, { skill: "read", label: "Read" }, { skill: "write", label: "Write" }, { skill: "chunks", label: "Chunks" }, { skill: "grammar", label: "Grammar" }, { skill: "pronunciation", label: "Pronunciation" }, { skill: "exam", label: "Exam Mode" }] as const;
-type View = "today" | "practice" | "progress" | "settings";
-type Active = { skill: Skill; minutes: number; activityId?: string; mode?: Category | "mixed" | "review"; rules?: string[] };
-
-export default function Home() {
-  const coach = useCoach();
-  const { state, ready } = coach;
-  const [language, setLanguage] = useState<Language>("en");
-  const [view, setView] = useState<View>("today");
-  const [progress, setProgress] = useState<ProgressState>(emptyProgress);
-  const [legacyError, setLegacyError] = useState("");
-  const [active, setActive] = useState<Active | null>(null);
-  const [glosses, setGlosses] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [setup, setSetup] = useState(false);
-  const [setupLanguages, setSetupLanguages] = useState<"en" | "de" | "both">("both");
-  const [examVisited, setExamVisited] = useState(false);
-  const [examTrack, setExamTrack] = useState<"ielts" | "school">("ielts");
-  const [install, setInstall] = useState(false);
-  const [date, setDate] = useState(localDate());
-  const pref = state.preferences[language];
-  const level = pref.currentLevel ?? progress.settings[language];
-  const plan = makePlan(language, level, pref.dailyMinutes, date, pref.goal, state.sessions);
-  const languageSessions = state.sessions.filter(s => s.language === language);
-  const chunks = state.chunks.filter(c => c.language === language);
-  const completeIds = new Set(languageSessions.filter(s => s.date === date && s.activityId).map(s => s.activityId));
-  const completeCount = plan.filter(a => completeIds.has(a.id)).length;
-  const nextActivity = plan.find(a => !completeIds.has(a.id));
-  const input = getInput(language, level, Math.floor(new Date(date + "T12:00:00Z").getTime() / 86400000));
-  const featured = input.expressions[0];
-  const navRef = useRef<HTMLElement>(null);
-  const screenRef = useRef<HTMLElement>(null);
-
-  const refreshProgress = useCallback(async () => {
-    try {
-      const r = await fetch("/api/progress", { cache: "no-store" });
-      const data = await r.json() as ProgressState & {error?: string};
-      if (!r.ok) throw new Error(data.error ?? "Previous exercise progress could not load.");
-      setProgress(data); setLegacyError("");
-    } catch (e) { setLegacyError((e as Error).message); }
-  }, []);
-  useEffect(() => {
-    void refreshProgress();
-    try { if (localStorage.getItem("phrase-language") === "de") setLanguage("de"); setGlosses(localStorage.getItem("phrase-glosses") === "true"); } catch {}
-    const update = () => setDate(localDate());
-    const id = window.setInterval(update, 60000);
-    document.addEventListener("visibilitychange", update);
-    return () => { clearInterval(id); document.removeEventListener("visibilitychange", update); };
-  }, [refreshProgress]);
-  useEffect(() => {
-    document.documentElement.dataset.theme = state.theme;
-  }, [state.theme]);
-  useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(""), 4000); return () => clearTimeout(id); }, [notice]);
-  useEffect(() => { window.scrollTo({ top: 0, behavior: "instant" }); screenRef.current?.focus({ preventScroll: true }); }, [view, active?.skill, language, setup]);
-
-  function switchLanguage(l: Language) {
-    window.speechSynthesis?.cancel(); setLanguage(l); setActive(null); setSetup(false); setNotice("");
-    try { localStorage.setItem("phrase-language", l); } catch {}
-  }
-  function go(v: View) { setActive(null); setSetup(false); setView(v); window.speechSynthesis?.cancel(); }
-  function start(skill: Skill, activity?: PlanActivity) {
-    if (skill === "exam") setExamVisited(true);
-    setActive({ skill, minutes: activity?.minutes ?? (skill === "speak" ? 5 : 10), activityId: activity?.id });
-  }
-  function finish(seconds: number, rating?: "easy" | "okay" | "difficult") {
-    if (!active) return;
-    coach.recordSession({ language, skill: active.skill, seconds: Math.max(1, Math.round(seconds)), ...(rating ? { rating } : {}), ...(active.activityId ? { activityId: active.activityId } : {}) });
-    setNotice("Practice saved. A little more fluent."); setActive(null); if (active.activityId) setView("today");
-  }
-  function startQuiz(mode: Category | "mixed" | "review", rules?: string[]) {
-    setActive({ skill: mode === "exam" ? "exam" : "grammar", minutes: 10, mode, rules });
-  }
-  const actions = useRef({ language, progress, active, startQuiz, switchLanguage });
-  actions.current = { language, progress, active, startQuiz, switchLanguage };
-  useEffect(() => {
-    type Tool = { name: string; description: string; inputSchema: object; annotations: { readOnlyHint: boolean }; execute: (input: Record<string, unknown>) => unknown };
-    const context = (document as Document & { modelContext?: { registerTool: (tool: Tool, options: { signal: AbortSignal }) => void | Promise<void> } }).modelContext;
-    if (!context?.registerTool) return;
-    const controller = new AbortController();
-    const specs: Tool[] = [
-      { name: "get_practice_state", description: "Read selected language, saved exercise progress and active practice.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute(input) { if (Object.keys(input).length) throw new Error("No parameters accepted"); return { language: actions.current.language, progress: actions.current.progress, session: actions.current.active }; } },
-      { name: "start_practice", description: "Open an existing English or German exercise session. Does not submit answers.", inputSchema: { type: "object", properties: { language: { type: "string", enum: ["en", "de"] }, category: { type: "string", enum: ["mixed", "vocabulary", "grammar", "sentences", "daily", "exam", "review"] } }, required: ["language", "category"], additionalProperties: false }, annotations: { readOnlyHint: false }, execute(input) { if (Object.keys(input).some(k => !["language", "category"].includes(k)) || !["en", "de"].includes(String(input.language)) || !["mixed", "vocabulary", "grammar", "sentences", "daily", "exam", "review"].includes(String(input.category))) throw new Error("Choose a supported language and category"); if (actions.current.active) throw new Error("Close current practice first"); actions.current.switchLanguage(input.language as Language); actions.current.startQuiz(input.category as Category); return { started: true, language: input.language, category: input.category }; } }
-    ];
-    for (const tool of specs) { try { void Promise.resolve(context.registerTool(tool, { signal: controller.signal })).catch(() => {}); } catch {} }
-    return () => controller.abort();
-  }, []);
-
-  function saveFeatured() {
-    coach.saveChunk({ ...featured, context: featured.context ?? input.title, language, level }); setNotice("Saved to your chunks.");
-  }
-  async function exportData() {
-    let examDrafts: unknown = null;
-    try { const response = await fetch("/api/writing", {cache:"no-store"}); if (response.ok) examDrafts = await response.json(); } catch {}
-    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), coach: state, exerciseProgress: progress, examDrafts, preferences: {language, chineseHints: glosses} }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "phrase-learning-backup.json"; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-  const firstWeekDay = new Date(date + "T12:00:00Z"); firstWeekDay.setUTCDate(firstWeekDay.getUTCDate() - (firstWeekDay.getUTCDay() + 6) % 7);
-  const weekDates = Array.from({ length: 7 }, (_, i) => { const d = new Date(firstWeekDay); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0, 10); });
-  const weekly = languageSessions.filter(s => weekDates.includes(s.date));
-  const weeklyMinutes = Math.round(weekly.reduce((t, s) => t + s.seconds, 0) / 60);
-  const daysPracticed = new Set([...languageSessions.map(s => s.date), ...progress.days.filter(d => d.language === language && d.attempts > 0).map(d => d.date)]).size;
-  const studiedChunks = chunks.filter(c => c.mastery > 0).length;
-  const draftKey = `${language}:${level}:${active?.skill ?? "write"}:${date}`;
-  const preferenceForm = (l: Language, compact = false) => {
-    const p = state.preferences[l];
-    return <section key={l} className={compact ? "setup-language" : "settings-group"}>
-      <div className="group-heading"><h2>{l === "en" ? "English" : "Deutsch"}</h2><span>Your own pace</span></div>
-      <div className="settings-fields">
-        <label className="form-field">Current level<select value={p.currentLevel ?? progress.settings[l]} onChange={e => { coach.updatePreferences(l, { currentLevel: e.target.value as Level }); setProgress(old => ({ ...old, settings: { ...old.settings, [l]: e.target.value as Level } })); }}>{levels.map(x => <option key={x}>{x}</option>)}</select></label>
-        <label className="form-field">Target level<select value={p.targetLevel} onChange={e => coach.updatePreferences(l, { targetLevel: e.target.value as Level })}>{levels.map(x => <option key={x}>{x}</option>)}</select></label>
-        <label className="form-field">Main goal<select value={p.goal} onChange={e => coach.updatePreferences(l, { goal: e.target.value })}>{goals.filter(g => l === "en" || g.value !== "ielts").map(g => <option key={g.value} value={g.value}>{g.label}</option>)}</select></label>
-        <label className="form-field">Daily time<select value={p.dailyMinutes} onChange={e => coach.updatePreferences(l, { dailyMinutes: Number(e.target.value) as 20 | 45 | 60 | 90 })}>{times.map(x => <option key={x} value={x}>{x} min</option>)}</select></label>
-      </div>
-    </section>;
-  };
-
-  return <div className="coach-app">
-    <header className="coach-header">
-      <button className="coach-brand" onClick={() => go("today")} aria-label="Phrase home"><span className="coach-logo">p<span/></span><span>phrase<span className="brand-dot">.</span></span></button>
-      <div className="language-control" aria-label="Learning language"><button aria-pressed={language === "en"} onClick={() => switchLanguage("en")}>English</button><button aria-pressed={language === "de"} onClick={() => switchLanguage("de")}>Deutsch</button></div>
-    </header>
-    <main className={`coach-main ${active ? "has-session" : ""}`} ref={screenRef} tabIndex={-1}>
-      {(coach.error || legacyError) && <div className="coach-alert" role="alert"><span>{coach.error || legacyError}</span><button onClick={() => { coach.retry(); void refreshProgress(); }}>Retry</button></div>}
-      {notice && <div className="coach-toast" role="status"><Check size={16}/>{notice}</div>}
-      {setup ? <div className="setup-screen"><button className="back-link" onClick={() => setSetup(false)}><ArrowLeft size={18}/>Back</button><span className="eyebrow">YOUR PERSONAL COACH</span><h1>A plan that fits you.</h1><p className="page-description">Set a starting point. You can change it anytime.</p><label className="form-field setup-select">I’m learning<select value={setupLanguages} onChange={e => setSetupLanguages(e.target.value as "en" | "de" | "both")}><option value="both">English & German</option><option value="en">English</option><option value="de">German</option></select></label>{(setupLanguages === "both" ? ["en", "de"] as const : [setupLanguages] as const).map(l => preferenceForm(l, true))}<button className="primary-button wide" onClick={() => { coach.finishOnboarding(); if (setupLanguages !== "both") switchLanguage(setupLanguages); setSetup(false); setView("today"); }}>Start my plan<ArrowRight size={18}/></button></div> : <>
-        {active?.mode ? <ExercisePractice language={language} level={level} progress={progress} onProgress={setProgress} mode={active.mode} rules={active.rules} onClose={() => setActive(null)} onSaveExpression={coach.saveChunk} onComplete={seconds => finish(seconds)} /> : active && ["listen", "read", "speak", "write", "pronunciation"].includes(active.skill) ? <FluencySession key={`${language}:${active.activityId ?? active.skill}`} language={language} level={level} skill={active.skill as "listen" | "read" | "speak" | "write" | "pronunciation"} minutes={active.minutes} activityId={active.activityId} draft={state.drafts[draftKey] ?? ""} onDraftChange={v => coach.setDraft(draftKey, v)} onSaveChunk={coach.saveChunk} onComplete={r => finish(r.seconds, r.rating)} onClose={() => setActive(null)} /> : active?.skill === "chunks" ? <ChunksWorkspace language={language} level={level} chunks={chunks} glosses={glosses} onSave={coach.saveChunk} onReview={coach.reviewChunk} onClose={() => setActive(null)} onComplete={finish}/> : active?.skill === "grammar" ? <GrammarWorkspace language={language} level={level} progress={progress} glosses={glosses} onPractice={(mode, rules) => setActive(a => a ? { ...a, mode, rules } : null)} onClose={() => setActive(null)}/> : !active && <>
-          {view === "today" && <div className="today-layout">
-            <div className="today-primary">
-              <div className="today-overline"><span>{new Intl.DateTimeFormat("en", { weekday: "long", month: "short", day: "numeric" }).format(new Date(date + "T12:00:00Z"))}</span><span className="level-pill">{level}<ArrowRight size={12}/>{pref.targetLevel}</span></div>
-              <div className="today-heading"><h1>Today<span className="heading-dot">.</span></h1><div className="daily-budget"><strong>{pref.dailyMinutes}</strong><span>min for you</span></div></div>
-              <p className="today-subtitle">A little closer to natural {language === "en" ? "English" : "German"}.</p>
-              <div className="time-selector"><span>I have</span><div className="segmented" aria-label="Available study time">{times.map(t => <button key={t} aria-pressed={pref.dailyMinutes === t} onClick={() => coach.updatePreferences(language, { dailyMinutes: t })}>{t}<span> min</span></button>)}</div></div>
-              <section className="daily-plan" aria-label="Today's learning plan">{plan.map((a, i) => {
-                const Icon = skillIcons[a.skill]; const done = completeIds.has(a.id);
-                return <button key={a.id} className={`activity-row ${done ? "activity-done" : ""}`} onClick={() => start(a.skill, a)} disabled={!ready}>
-                  <span className={`activity-icon activity-icon-${a.skill}`}>{done ? <Check size={21}/> : <Icon size={21}/>}</span><span className="activity-copy"><span className="activity-label">{String(i + 1).padStart(2, "0")}<span>{a.minutes} min</span></span><strong>{a.title}</strong><span className="activity-instruction">{shortInstructions[language][a.skill]}</span></span><ChevronRight size={18} className="row-chevron"/>
-                </button>;
-              })}</section>
-              <button className="primary-button start-today" disabled={!ready} onClick={() => nextActivity ? start(nextActivity.skill, nextActivity) : go("practice")}><PlayIcon/>{!ready ? "Loading your plan…" : completeCount === plan.length ? "Explore practice" : completeCount ? "Continue today" : "Start today"}<ArrowRight size={19}/></button>
-              <div className="plan-footnote"><span>{completeCount ? `${completeCount} of ${plan.length} activities completed` : "Your plan changes each day."}</span><span><span className="tiny-dot"/>Made for fluency</span></div>
-            </div>
-            <aside className="today-aside"><section className="daily-expression"><div className="expression-top"><span className="eyebrow">TAKE THIS WITH YOU</span><Layers size={19}/></div><h2 lang={language}>{featured.expression}</h2><p>{featured.meaning}</p><blockquote lang={language}>{featured.example}</blockquote><button className="expression-save" onClick={saveFeatured} disabled={!ready || chunks.some(c => c.expression.toLowerCase() === featured.expression.toLowerCase())}>{chunks.some(c => c.expression.toLowerCase() === featured.expression.toLowerCase()) ? <><Check size={17}/>In your chunks</> : <><Plus size={17}/>Save expression</>}</button></section><div className="coach-thought"><span className="thought-line"/><p>Understand more.<br/>Translate less.<br/><strong>Make it your language.</strong></p></div>{!state.onboarded && ready && <button className="setup-invite" onClick={() => setSetup(true)}><span><strong>Make it yours</strong><small>Choose your level, goal and pace.</small></span><ArrowUpRight size={19}/></button>}</aside>
-          </div>}
-          {view === "practice" && <div className="standard-screen"><span className="eyebrow">FOLLOW YOUR CURIOSITY</span><h1>Practice<span className="heading-dot">.</span></h1><p className="page-description">One skill. Your full attention.</p><div className="practice-grid">{practiceItems.map(({ skill, label }, i) => { const Icon = skillIcons[skill]; return <button key={skill} onClick={() => start(skill)} disabled={!ready}><span className="practice-item-number">0{i + 1}</span><Icon size={27} strokeWidth={1.5}/><strong>{label}</strong><ArrowUpRight size={17} className="practice-arrow"/></button>; })}</div></div>}
-          {view === "progress" && <div className="standard-screen progress-screen"><span className="eyebrow">{language === "en" ? "YOUR ENGLISH" : "DEIN DEUTSCH"}</span><h1>Keep showing up<span className="heading-dot">.</span></h1><div className="progress-level"><span className="level-large">{level}</span><div><strong>Current level</strong><p>Self-selected · working towards {pref.targetLevel}</p></div></div><section className="weekly-section"><div className="group-heading"><h2>This week</h2><span><strong>{weeklyMinutes}</strong> active min</span></div><div className="week-bars" aria-label="Active minutes this week">{weekDates.map((d, i) => { const min = Math.round(weekly.filter(s => s.date === d).reduce((t, s) => t + s.seconds, 0) / 60); return <div key={d} className={d === date ? "week-current" : ""}><span className="week-minutes">{min || "—"}</span><div className="week-track"><span style={{ height: `${Math.min(100, min / Math.max(pref.dailyMinutes, 1) * 100)}%` }}/></div><span>{["M", "T", "W", "T", "F", "S", "S"][i]}</span></div>; })}</div></section><div className="progress-facts"><div><strong>{daysPracticed}</strong><span>days practiced</span></div><div><strong>{studiedChunks}</strong><span>expressions reviewed</span></div><div><strong>{languageSessions.filter(s => s.skill === "speak").length}</strong><span>speaking sessions</span></div><div><strong>{languageSessions.filter(s => s.skill === "write").length}</strong><span>writing sessions</span></div></div><section className="skill-activity"><div className="group-heading"><h2>Your practice balance</h2><span>This week</span></div>{(["listen", "speak", "read", "write", "chunks", "grammar"] as const).map(s => { const seconds = weekly.filter(x => x.skill === s).reduce((t, x) => t + x.seconds, 0); const total = weekly.filter(x => x.skill !== "exam").reduce((t, x) => t + x.seconds, 0); return <div className="skill-activity-row" key={s}><div><span>{s === "chunks" ? "Vocabulary / Chunks" : skillNames[s]}</span><span>{Math.round(seconds / 60)} min</span></div><div className="activity-bar"><span style={{ width: `${total ? seconds / total * 100 : 0}%` }}/></div></div>; })}<p className="coach-note">These show practice activity, not measured proficiency. Your level changes when you choose it.</p></section><details className="quiet-details"><summary>Exam & earlier exercise activity</summary><p className="coach-note">Exam sessions: {languageSessions.filter(s => s.skill === "exam").length}. This is separate from your language level.</p><p className="coach-note">Earlier exercises: {Object.values(progress.records).filter(r => r.exercise_id.startsWith(language + "-")).reduce((t, r) => t + r.attempts, 0)} attempts. Saved review history is preserved.</p></details></div>}
-          {view === "settings" && <div className="standard-screen settings-screen"><span className="eyebrow">ON YOUR TERMS</span><h1>Settings<span className="heading-dot">.</span></h1><p className="page-description">A separate plan for each language.</p>{preferenceForm("en")}{preferenceForm("de")}<section className="settings-group"><div className="group-heading"><h2>Appearance & support</h2></div><label className="form-field">Appearance<select value={state.theme} onChange={e => coach.setTheme(e.target.value as "system" | "light" | "dark")}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="toggle-row"><span>Chinese hints<small>Keep extra support in exercise practice.</small></span><input type="checkbox" checked={glosses} onChange={e => { setGlosses(e.target.checked); try { localStorage.setItem("phrase-glosses", String(e.target.checked)); } catch {} }}/></label><button className="list-row" onClick={() => setInstall(!install)} aria-expanded={install}><span><strong>Add to Home Screen</strong><small>Open Phrase like an app on your iPhone.</small></span><ChevronRight size={18}/></button>{install && <p className="coach-note install-note">Open this site in Safari, tap Share, then Add to Home Screen. The same account keeps your saved learning data.</p>}<button className="list-row" onClick={() => setSetup(true)}><span>Set up my plan</span><ChevronRight size={18}/></button></section><section className="settings-group"><div className="group-heading"><h2>Your learning data</h2><span className="sync-state">{coach.syncStatus === "saved" ? "Saved" : coach.syncStatus === "offline" || coach.syncStatus === "local" ? "Saved on this device" : "Syncing…"}</span></div><p className="coach-note">Levels, exercises and exam drafts stay in Phrase. New chunks, writing and practice sessions also save here.</p><button className="secondary-button" onClick={() => void exportData()}>Download learning backup<ArrowUpRight size={16}/></button><p className="coach-note">Speaking recordings stay on your device for the session. Writing feedback uses self-review and examples.</p></section></div>}
-        </>}
-        {examVisited && <div hidden={active?.skill !== "exam" || !!active.mode} className="exam-screen"><button className="back-link" onClick={() => setActive(null)}><ArrowLeft size={18}/>Practice</button><span className="eyebrow">WHEN YOU NEED IT</span><h1>Exam Mode<span className="heading-dot">.</span></h1><p className="page-description">Prepare for the task. Keep language learning first.</p>{language === "en" && <div className="segmented exam-track"><button aria-pressed={examTrack === "ielts"} onClick={() => setExamTrack("ielts")}>IELTS</button><button aria-pressed={examTrack === "school"} onClick={() => setExamTrack("school")}>School / Klausur</button></div>}<ExamWorkspace language={language} track={language === "de" ? "school" : examTrack} active={active?.skill === "exam" && !active.mode} onStartDrills={() => startQuiz("exam")} onComplete={finish}/></div>}
-      </>}
-    </main>
-    <nav className="bottom-nav" aria-label="Main navigation" ref={navRef}>{([{ value: "today", label: "Today", Icon: CalendarDays }, { value: "practice", label: "Practice", Icon: Layers }, { value: "progress", label: "Progress", Icon: ChartNoAxesCombined }, { value: "settings", label: "Settings", Icon: Settings2 }] as const).map(({ value, label, Icon }) => <button key={value} onClick={() => go(value)} aria-current={view === value && !active ? "page" : undefined} className={(active ? "practice" : view) === value ? "nav-active" : ""}><Icon size={21} strokeWidth={1.75}/><span>{label}</span></button>)}</nav>
-    <footer className="coach-footer"><span>phrase · a little, every day.</span><span>{language === "en" ? "English" : "Deutsch"} · {level}</span></footer>
-  </div>;
+type View="today"|"challenges"|"progress"|"settings";
+const levels:Level[]=["A1","A2","B1","B2","C1","C2"];
+const goals=[{value:"natural",label:"Speak naturally"},{value:"near-native",label:"Near-native"},{value:"school",label:"School / Klausur"},{value:"ielts",label:"IELTS"},{value:"work",label:"Work / university"}];
+const dimensionNames:Record<string,string>={grammar:"Grammar",naturalness:"Natural expression",precision:"Vocabulary precision",clarity:"Clarity",register:"Register",reasoning:"Reasoning"};
+const defaultInterests:MissionPreferences={likedTopics:["entrepreneurship","technology","volleyball","university","business","society","everyday"],dislikedTopics:[],rejectedTemplateIds:[]};
+export default function Home(){
+ const coach=useCoach();
+ const missions=useMissions();
+ const [language,setLanguage]=useState<Language>("en");
+ const [view,setView]=useState<View>("today");
+ const [activeId,setActiveId]=useState<string|null>(null);
+ const [library,setLibrary]=useState<"library"|"chunks"|"exam"|null>(null);
+ const [filter,setFilter]=useState<MissionKind|"all">("all");
+ const [message,setMessage]=useState("");
+ const [install,setInstall]=useState(false);
+ const [glosses,setGlosses]=useState(false);
+ const [date,setDate]=useState(()=>new Date().toISOString().slice(0,10));
+ const main=useRef<HTMLElement>(null);
+ const pref=coach.state.preferences[language];
+ const level=pref.currentLevel??"B1";
+ const interests=missions.preferences[language]??defaultInterests;
+ const recommended=recommendMissions(language,interests,missions.runs,date,3);
+ const feature=recommended[0];
+ const alternatives=recommended.slice(1,3);
+ const runs=missions.runs.filter(r=>r.language===language);
+ const current=missions.runs.find(r=>r.id===activeId&&r.language===language);
+ const currentTemplate=current?getMissionTemplate(current.templateId):null;
+ const activeRun=runs.filter(r=>r.status==="active").sort((a,b)=>b.updatedAt-a.updatedAt)[0];
+ const completed=runs.filter(r=>r.status==="complete");
+ const retried=runs.reduce((n,r)=>n+r.turns.filter(t=>t.attempt===2).length,0);
+ const status=missions.service;
+ const text=(en:string,de:string)=>language==="en"?en:de;
+ useEffect(()=>{try{if(localStorage.getItem("phrase-language")==="de")setLanguage("de");setGlosses(localStorage.getItem("phrase-glosses")==="true");}catch{}const id=setInterval(()=>setDate(new Date().toISOString().slice(0,10)),60000);return()=>clearInterval(id);},[]);
+ useEffect(()=>{document.documentElement.dataset.theme=coach.state.theme;},[coach.state.theme]);
+ useEffect(()=>{window.scrollTo({top:0,behavior:"instant"});main.current?.focus({preventScroll:true});},[view,language,activeId,library]);
+ useEffect(()=>{if(!message)return;const id=setTimeout(()=>setMessage(""),3500);return()=>clearTimeout(id);},[message]);
+ function go(next:View){window.speechSynthesis?.cancel();setView(next);setActiveId(null);setLibrary(null);}
+ function changeLanguage(l:Language){window.speechSynthesis?.cancel();setLanguage(l);setActiveId(null);setLibrary(null);setMessage("");try{localStorage.setItem("phrase-language",l);}catch{}}
+ async function start(id:string){const run=await missions.start(id,language,level);if(run)setActiveId(run.id);}
+ function savePhrase(p:{expression:string;meaning:string;example:string;context:string;language:Language;level:Level}){coach.saveChunk(p);setMessage(text("Saved to your chunks.","In deinen Chunks gespeichert."));}
+ function topicPreference(topic:MissionTopic,choice:"like"|"dislike"){
+  const liked=interests.likedTopics.filter(t=>t!==topic),disliked=interests.dislikedTopics.filter(t=>t!==topic);
+  if(choice==="like"&&!interests.likedTopics.includes(topic))liked.push(topic);
+  if(choice==="dislike"&&!interests.dislikedTopics.includes(topic))disliked.push(topic);
+  void missions.updatePreferences(language,{...interests,likedTopics:liked,dislikedTopics:disliked});
+ }
+ async function downloadBackup(){let earlier:unknown=null;try{const r=await fetch("/api/writing",{cache:"no-store"});if(r.ok)earlier=await r.json();}catch{}const blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),coach:coach.state,missions:{runs:missions.runs,preferences:missions.preferences},examDrafts:earlier},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="phrase-learning-backup.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ const patterns=Object.entries(runs.reduce((acc,r)=>{for(const turn of r.turns)if(turn.attempt===1)for(const correction of turn.feedback.improvements)acc[correction.dimension]=(acc[correction.dimension]??0)+1;return acc;},{} as Record<string,number>)).sort((a,b)=>b[1]-a[1]);
+ const latestCorrections=[...runs].sort((a,b)=>b.updatedAt-a.updatedAt).flatMap(r=>r.turns.filter(t=>t.attempt===1).flatMap(t=>t.feedback.improvements)).slice(0,3);
+ const kindIcon=(kind:MissionKind)=>kind==="mystery"?<Search size={17}/>:kind==="debate"?<MessageCircle size={17}/>:<Compass size={17}/>;
+ const settingsFor=(l:Language)=>{const p=coach.state.preferences[l];return <section className="mission-settings-group" key={l}><div className="mission-section-line"><h2>{l==="en"?"English":"Deutsch"}</h2><span>Independent goals</span></div><div className="mission-setting-fields"><label>Current level<select aria-label={`${l==="en"?"English":"German"} current level`} value={p.currentLevel??"B1"} onChange={e=>coach.updatePreferences(l,{currentLevel:e.target.value as Level})}>{levels.map(v=><option key={v}>{v}</option>)}</select></label><label>Target level<select aria-label={`${l==="en"?"English":"German"} target level`} value={p.targetLevel} onChange={e=>coach.updatePreferences(l,{targetLevel:e.target.value as Level})}>{levels.map(v=><option key={v}>{v}</option>)}</select></label><label className="mission-field-wide">Main goal<select aria-label={`${l==="en"?"English":"German"} main goal`} value={p.goal} onChange={e=>coach.updatePreferences(l,{goal:e.target.value})}>{goals.filter(g=>l==="en"||g.value!=="ielts").map(g=><option key={g.value} value={g.value}>{g.label}</option>)}</select></label></div></section>;};
+ return <div className="mission-app">
+  <header className="mission-app-header"><button className="mission-wordmark" aria-label="Phrase home" onClick={()=>go("today")}><span className="mission-logo">p<span/></span><span>phrase<span className="mission-brand-dot">.</span></span></button><div className="mission-language" role="group" aria-label="Learning language"><button aria-pressed={language==="en"} onClick={()=>changeLanguage("en")}>English</button><button aria-pressed={language==="de"} onClick={()=>changeLanguage("de")}>Deutsch</button></div></header>
+  <main className={`mission-shell ${current?"mission-shell-active":""}`} ref={main} tabIndex={-1}>
+   {message&&<div className="mission-toast" role="status"><Check size={16}/>{message}</div>}
+   {(coach.error||(!current&&missions.error))&&<div className="mission-notice" role="alert"><span>{!current&&missions.error?missions.error:coach.error}</span>{missions.errorCode==="unauthorized"||missions.errorCode==="authentication_required"||missions.errorCode==="sign_in_required"?<a href="/signin-with-chatgpt?return_to=%2F" target="_top">Sign in</a>:<button onClick={()=>{void missions.refresh();coach.retry();}}>Try again</button>}</div>}
+   {current&&currentTemplate?<MissionSession key={current.id} run={current} template={currentTemplate} busy={missions.loading} error={missions.error} service={status} onRespond={(answer,mode)=>missions.respond(current.id,answer,mode)} onAdvance={()=>missions.advance(current.id)} onFinish={()=>missions.finish(current.id)} onClose={()=>setActiveId(null)} onSavePhrase={savePhrase}/>:library?<PracticeLibrary key={`${language}:${library}`} language={language} level={level} coach={coach} initial={library} onClose={()=>setLibrary(null)}/>:<>
+   {view==="today"&&feature&&<div className="mission-today"><div className="mission-today-heading"><div><span className="mission-kicker">{new Intl.DateTimeFormat("en",{weekday:"long",month:"short",day:"numeric"}).format(new Date(date+"T12:00:00Z"))}</span><h1>{text("Follow your curiosity.","Folge deiner Neugier.")}</h1></div><span className="mission-level">{level}<span>→</span>{pref.targetLevel}</span></div><div className="mission-today-grid"><section className={`mission-featured mission-featured-${feature.kind}`} aria-label="Recommended mission"><div className="mission-feature-top"><span>{kindIcon(feature.kind)}{MISSION_KIND_LABELS[feature.kind][language]}</span><span>{text("RECOMMENDED FOR YOU","FÜR DICH EMPFOHLEN")}</span></div><div className="mission-feature-copy"><h2>{feature.title[language]}</h2><p>{feature.teaser[language]}</p></div><MissionArt kind={feature.kind}/><div className="mission-feature-bottom"><span>{text("A real conversation. A new perspective.","Ein echtes Gespräch. Eine neue Perspektive.")}</span><button className="mission-start" aria-label={`Start ${feature.title[language]}`} disabled={!missions.ready||missions.loading} onClick={()=>void start(feature.id)}><span>{missions.loading?text("Opening…","Wird geöffnet…"):text("Start challenge","Challenge starten")}</span><ArrowRight size={19}/></button></div></section><aside className="mission-alternatives"><div className="mission-section-line"><h2>{text("A different mood?","Lieber etwas anderes?")}</h2><span>02</span></div>{alternatives.map(t=><button className="mission-alternative" key={t.id} onClick={()=>void start(t.id)} disabled={!missions.ready||missions.loading}><span className={`mission-kind-icon mission-kind-${t.kind}`}>{kindIcon(t.kind)}</span><span className="mission-alternative-copy"><small>{MISSION_KIND_LABELS[t.kind][language]}</small><strong>{t.title[language]}</strong><span>{t.teaser[language]}</span></span><ArrowUpRight size={19}/></button>)}<div className="mission-small-thought"><span/><p>{text("Better language begins with something worth saying.","Gute Sprache beginnt mit etwas, das du sagen möchtest.")}</p></div></aside></div>{activeRun&&<button className="mission-resume" onClick={()=>setActiveId(activeRun.id)}><RotateCcw size={17}/><span>{text("Pick up where you left off","Mach dort weiter, wo du warst")}<strong>{getMissionTemplate(activeRun.templateId)?.title[language]}</strong></span><ArrowRight size={17}/></button>}<div className="mission-today-footnote"><span><span className="mission-live-dot"/>{text("Responsive AI · your level · your interests","Echte KI · dein Niveau · deine Interessen")}</span><button onClick={()=>go("settings")}>{text("Make it yours","Pass es an")}<ArrowUpRight size={12}/></button></div></div>}
+   {view==="today"&&!feature&&<div className="mission-empty"><h1>Choose what draws you in.</h1><p>Your topic choices currently exclude every mission. Bring one topic back to discover a new challenge.</p><button className="mission-button" onClick={()=>go("settings")}>Choose my interests<ArrowRight size={17}/></button></div>}
+   {view==="challenges"&&<div className="mission-catalog"><span className="mission-kicker">{text("A REASON TO USE YOUR LANGUAGE","SPRACHE, DIE DU WIRKLICH BRAUCHST")}</span><h1>{text("Step into something.","Wag etwas Neues.")}</h1><p className="mission-page-note">{text("A point to defend. A deal to make. A story to unravel.","Ein Standpunkt. Eine Verhandlung. Ein Fall, der dich fordert.")}</p><div className="mission-filters" aria-label="Challenge types">{(["all","debate","roleplay","mystery"] as const).map(k=><button key={k} aria-pressed={filter===k} onClick={()=>setFilter(k)}>{k==="all"?text("All","Alle"):MISSION_KIND_LABELS[k][language]}</button>)}</div><div className="mission-catalog-list">{missionTemplates.filter(t=>filter==="all"||t.kind===filter).map(t=><button className="mission-catalog-item" key={t.id} disabled={missions.loading||!missions.ready} onClick={()=>void start(t.id)}><div className={`mission-catalog-illustration mission-kind-${t.kind}`}><MissionArt kind={t.kind} compact/></div><span><small>{MISSION_KIND_LABELS[t.kind][language]}<span> · </span>{MISSION_TOPIC_LABELS[t.topic][language]}</small><strong>{t.title[language]}</strong><p>{t.teaser[language]}</p></span><ArrowUpRight size={20}/></button>)}</div><section className="mission-your-tools"><span className="mission-kicker">KEEP WHAT WORKS</span><div className="mission-tool-links"><button onClick={()=>setLibrary("chunks")}><Layers size={20}/><span>Chunks<small>Your saved expressions</small></span><ChevronRight size={17}/></button><button onClick={()=>setLibrary("exam")}><GraduationCap size={21}/><span>{language==="en"?"IELTS & school":"Klausuren"}<small>Focused exam practice</small></span><ChevronRight size={17}/></button><button onClick={()=>setLibrary("library")}><BookOpen size={20}/><span>Practice library<small>Grammar, shadowing & earlier exercises</small></span><ChevronRight size={17}/></button></div></section></div>}
+   {view==="progress"&&<div className="mission-progress"><span className="mission-kicker">{text("YOUR ENGLISH, IN YOUR OWN WORDS","DEIN DEUTSCH, IN DEINEN WORTEN")}</span><h1>{text("See what changed.","Sieh, was sich verändert.")}</h1><p className="mission-page-note">{text("Real responses. Useful feedback. Another try.","Eigene Antworten. Nützliches Feedback. Ein neuer Versuch.")}</p><div className="mission-evidence-stats"><div><strong>{completed.length}</strong><span>missions completed</span></div><div><strong>{retried}</strong><span>answers retried</span></div><div><strong>{level}</strong><span>self-selected level</span></div></div>{patterns.length>0&&<section className="mission-patterns"><div className="mission-section-line"><h2>What to work on</h2><span>From AI feedback</span></div><p className="mission-quiet">These are observations from your answers, not a proficiency score.</p>{patterns.slice(0,3).map(([dimension,count])=><div className="mission-pattern" key={dimension}><span>{dimensionNames[dimension]??dimension}</span><span>{count} {count===1?"observation":"observations"}</span></div>)}<details className="mission-details"><summary>See recorded examples</summary>{latestCorrections.map((c,i)=><div className="mission-recorded-correction" key={`${c.original}:${i}`}><p><span>You wrote</span>{c.original}</p><p><span>A better version</span>{c.improved}</p></div>)}</details></section>}<section className="mission-history"><div className="mission-section-line"><h2>Your challenges</h2><span>{language==="en"?"English":"Deutsch"}</span></div>{runs.length===0?<div className="mission-empty"><MessageCircle size={25}/><h3>Your first story starts here.</h3><p>After a mission, compare your first answer with your retry.</p><button className="mission-button" onClick={()=>go("today")}>Find a challenge<ArrowRight size={16}/></button></div>:[...runs].sort((a,b)=>b.updatedAt-a.updatedAt).map(r=><button className="mission-history-row" key={r.id} onClick={()=>setActiveId(r.id)}><span className="mission-history-mark">{r.status==="complete"?<Check size={18}/>:<RotateCcw size={16}/>}</span><span><strong>{getMissionTemplate(r.templateId)?.title[language]??"Mission"}</strong><small>{r.status==="complete"?r.outcome?.label??"Completed":"In progress"} · {r.turns.length} responses</small></span><ChevronRight size={17}/></button>)}</section><details className="mission-details"><summary>Earlier learning activity</summary><p className="mission-quiet">{coach.state.sessions.filter(s=>s.language===language).length} practice sessions and {coach.state.chunks.filter(c=>c.language===language).length} saved expressions remain in your library. They stay separate from mission outcomes and your chosen CEFR level.</p><button className="mission-button-secondary" onClick={()=>setLibrary("library")}>Open practice library</button></details></div>}
+   {view==="settings"&&<div className="mission-settings"><span className="mission-kicker">BUILD A WORLD YOU WANT TO ENTER</span><h1>Make it yours.</h1><p className="mission-page-note">Separate goals. Shared curiosity.</p>{settingsFor("en")}{settingsFor("de")}<section className="mission-settings-group"><div className="mission-section-line"><h2>Your {language==="en"?"English":"German"} interests</h2><span>Like / avoid</span></div><p className="mission-quiet">Tell us what draws you in. Leave a topic neutral to keep it in the mix.</p><div className="mission-topic-preferences">{MISSION_TOPICS.map(topic=><div key={topic}><span>{MISSION_TOPIC_LABELS[topic][language]}</span><div><button aria-label={`Like ${MISSION_TOPIC_LABELS[topic].en}`} aria-pressed={interests.likedTopics.includes(topic)} onClick={()=>topicPreference(topic,"like")} disabled={missions.loading}><Plus size={16}/></button><button aria-label={`Dislike ${MISSION_TOPIC_LABELS[topic].en}`} aria-pressed={interests.dislikedTopics.includes(topic)} onClick={()=>topicPreference(topic,"dislike")} disabled={missions.loading}><Minus size={16}/></button></div></div>)}</div><p className="mission-quiet">Switch English / Deutsch above to set different interests.</p></section><section className="mission-settings-group"><div className="mission-section-line"><h2>Appearance & support</h2></div><label className="mission-select-row">Appearance<select value={coach.state.theme} onChange={e=>coach.setTheme(e.target.value as "system"|"light"|"dark")}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="mission-toggle"><span>Chinese hints<small>For the existing exercise library.</small></span><input type="checkbox" checked={glosses} onChange={e=>{setGlosses(e.target.checked);try{localStorage.setItem("phrase-glosses",String(e.target.checked));}catch{}}}/></label><button className="mission-setting-link" onClick={()=>setInstall(!install)} aria-expanded={install}><span>Add to Home Screen</span><ChevronRight size={17}/></button>{install&&<p className="mission-quiet">In Safari, tap Share → Add to Home Screen. Your account keeps your saved progress.</p>}</section><section className="mission-settings-group"><div className="mission-section-line"><h2>AI & your data</h2><ShieldCheck size={18}/></div><div className="mission-service-status"><span className={status?.configured?"mission-live-dot":"mission-pending-dot"}/><span>{status?.configured?"OpenAI connected":"OpenAI setup pending"}</span></div><p className="mission-quiet">{status?.model??"gpt-4.1-mini"} · {status?.dailyLimit??30} AI responses per day. {status?.remainingToday??30} remaining.</p><p className="mission-quiet">Responses and selected learning context go to OpenAI for feedback. Audio is sent only when you choose Transcribe. Keys stay on the server. AI feedback can be mistaken; it does not certify a CEFR level.</p><button className="mission-setting-link" onClick={()=>void downloadBackup()}><span>Download learning backup</span><ArrowUpRight size={17}/></button><div className="mission-data-state"><span>{coach.syncStatus==="saved"?"Learning data saved":coach.syncStatus==="syncing"?"Saving…":"Device backup available"}</span><span>{missions.runs.length} saved missions</span></div></section></div>}
+   </>}
+  </main>
+  {!current&&<nav className="mission-bottom-nav" aria-label="Main navigation">{([{id:"today",label:"Today",Icon:Sun},{id:"challenges",label:"Challenges",Icon:Compass},{id:"progress",label:"Progress",Icon:ChartNoAxesCombined},{id:"settings",label:"Settings",Icon:Settings2}] as const).map(({id,label,Icon})=><button className={view===id?"mission-nav-active":""} aria-current={view===id?"page":undefined} key={id} onClick={()=>go(id)}><Icon size={21} strokeWidth={1.65}/><span>{label}</span></button>)}</nav>}
+  <footer className="mission-app-footer"><span>phrase · language, lived.</span><span>{language==="en"?"English":"Deutsch"}<span> / </span>{level}</span></footer>
+ </div>;
 }
-function PlayIcon() { return <svg width="17" height="17" viewBox="0 0 17 17" fill="none" aria-hidden="true"><path d="M5 3.5L13 8.5L5 13.5V3.5Z" fill="currentColor"/></svg>; }

@@ -22,6 +22,13 @@
       "when": 1791552000000,
       "tag": "0002_coach_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792560879845,
+      "tag": "0003_perpetual_sally_floyd",
+      "breakpoints": true
     }
   ]
 }
