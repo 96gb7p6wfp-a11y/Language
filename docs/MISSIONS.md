@@ -18,6 +18,14 @@ For local development, use an ignored `.env.local` through the secure key-setup 
 
 The variable name is case-sensitive: use exactly `OPENAI_API_KEY`. A secret named `api key`, a display label, or an OpenAI project key name does not configure this variable. Sites returns secret values masked; a saved secret cannot be downloaded into the local test environment. Its presence and Secret flag can be checked without reading the value. Saving environment changes alone does not prove that an undeployed version can read them.
 
+To import an existing replacement key locally, open an interactive workspace terminal and run:
+
+```sh
+python3 /workspace/phrase/scripts/configure-local-openai.py
+```
+
+Paste the key only into that terminal's hidden prompt. Do not put it in chat, a command argument or a shell assignment. The helper writes the ignored `.env.local` atomically with permissions `0600`, preserves other settings and refuses tracked, nonignored or symlink destinations. It refuses noninteractive input rather than falling back to visible typing. It does not call OpenAI, change the hosted secret or publish the Site. After saving, restart the local preview before live tests. If a workspace terminal is unavailable, report that limitation instead of sending the key through chat or uploading a secret file.
+
 The current default conversation model is `gpt-4.1-mini`; `OPENAI_MODEL` is a server-only override. The backend uses the Responses API with structured output and `store: false`. It sends a bounded scenario, recent turns and a small amount of relevant learning context, rather than an unlimited transcript. It does not enable browsing, tools, realtime voice or autonomous agents.
 
 ## Manual configuration
@@ -46,7 +54,7 @@ On 21 October 2026, the supplied local key authenticated with the model metadata
 
 On 22 October 2026, the local development proxy transport was repaired. When inherited HTTP proxy settings are present, `npm run dev` uses a server-only Vite transport to forward the fixed OpenAI endpoints through a session-authenticated loopback bridge. Node's native proxy support preserves the inherited proxy, exclusions and TLS trust. This path requires a Node version providing `node:http.setGlobalProxyFromEnv` (verified with Node 24.19.0). Development without a proxy and production retain native Worker fetch. The bridge is excluded from production builds; it is not a simulated AI provider.
 
-All 84 automated tests, TypeScript checks and the production build passed. A real Miniflare Worker request passed through the bridge and workspace proxy to OpenAI, receiving the expected HTTP 401 without supplying a key or generating tokens. The local mission API also loaded successfully with the development transport. Production artifacts contained no bridge markers, client-side key identifiers, private adjudication context or credential-shaped strings in source. Live conversation, feedback/retry and transcription checks remain unverified until a valid replacement is configured locally; the revoked local key must not be used. Hosted secret metadata and runtime access are separate checks. No publication was performed.
+All 84 application/transport tests, TypeScript checks and the production build passed. Three additional secure-import tests cover preservation, unsafe destinations, noninteractive input and secret-output protection. A real Miniflare Worker request passed through the bridge and workspace proxy to OpenAI, receiving the expected HTTP 401 without supplying a key or generating tokens. The local mission API also loaded successfully with the development transport. Production artifacts contained no bridge markers, client-side key identifiers, private adjudication context or credential-shaped strings in source. A subsequent Sites metadata check confirmed `OPENAI_API_KEY` with its Secret flag enabled at environment revision 2, without exposing the value. Live conversation, feedback/retry and transcription checks remain unverified until a valid replacement is configured locally; the revoked local key must not be used. Hosted secret metadata and runtime access are separate checks. No publication was performed.
 
 This repair applies to the Vite development preview. `npm start` runs the built Worker locally without the development bridge, so that separate local preview path still depends on its own network access. The real hosted Cloudflare Worker is not subject to the workspace's proxy configuration, but its authenticated OpenAI request still needs verification after an authorized deployment. Do not bypass the network proxy or disable TLS.
 
